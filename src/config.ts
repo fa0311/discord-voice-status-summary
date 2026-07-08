@@ -15,8 +15,12 @@ const Env = z.object({
 
   // 要約してステータスを更新する間隔
   SUMMARY_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+
+  // 直近の発話だけを要約対象にするため、文字起こしを溜めすぎないようにする
+  MAX_TRANSCRIPT_LINES: z.coerce.number().int().positive().default(50),
 });
 
 export type Config = z.infer<typeof Env>;
 
-export const loadConfig = (env: Record<string, string | undefined>): Config => Env.parse(env);
+export const loadConfig = (env: Record<string, string | undefined>): Config =>
+  Env.parse(env);

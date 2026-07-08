@@ -1,9 +1,14 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { generateText } from "ai";
+import { generateObject } from "ai";
+import { z } from "zod";
 
 const SYSTEM_PROMPT = `あなたは Discord 通話の書記です。
-通話の文字起こしを読み、いま話されている話題を日本語で 1 行に要約してください。
-全角 40 文字以内で、要約の本文だけを出力してください。`;
+入力は通話の文字起こしで、上から下へ時系列に並んでいます。
+最後に話されている話題を 1 つだけ選び、その中身を日本語 1 行 (全角 40 文字以内) にまとめて summary に入れてください。
+途中で話題が変わっている場合、過去の話題には触れないでください。`;
+
+// 思考過程や前置きが混入しないよう、JSON schema で出力を summary だけに縛る
+const Summary = z.object({ summary: z.string() });
 
 export interface SummarizerOptions {
   baseURL: string;
@@ -14,22 +19,26 @@ export interface Summarizer {
   summarize: (transcript: string) => Promise<string>;
 }
 
-/** LM Studio に文字起こしを投げて 1 行要約する。 */
+/** LM Studio に文字起こしを投げて、直近の話題を 1 行に要約する。 */
 export const createSummarizer = ({ baseURL, model }: SummarizerOptions): Summarizer => {
-  const provider = createOpenAICompatible({ name: "lmstudio", baseURL });
+  const provider = createOpenAICompatible({
+    name: "lmstudio",
+    baseURL,
+    supportsStructuredOutputs: true,
+  });
   const chatModel = provider(model);
 
   return {
     summarize: async (transcript) => {
-      const { text } = await generateText({
+      const { object } = await generateObject({
         model: chatModel,
         system: SYSTEM_PROMPT,
         prompt: transcript,
+        schema: Summary,
         // thinking を切る (速度優先。要約タスクに推論は不要)
         providerOptions: { lmstudio: { reasoningEffort: "none" } },
       });
-      // LLM が付ける末尾の改行などはここで落とす (「1 行の要約」が契約のため)
-      return text.trim();
+      return object.summary.trim();
     },
   };
 };

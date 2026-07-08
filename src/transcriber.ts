@@ -2,16 +2,22 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { experimental_transcribe } from "ai";
 
 // Whisper が無音・非音声に対して出しがちな定型の幻聴フレーズ。
-// 後のフレーズが前のフレーズの部分文字列なので、長い順に消すこと
-const HALLUCINATIONS = [
-  "ご視聴ありがとうございました。",
+const HALLUCINATIONS = new Set([
+  "最後までご視聴ありがとうございました",
   "ご視聴ありがとうございました",
-  "ありがとうございました。",
+  "ご視聴ありがとうございます",
+  "ご清聴ありがとうございました",
+  "チャンネル登録お願いします",
+  "お疲れ様でした",
+  "おやすみなさい",
   "ありがとうございました",
-];
+  "よろしくお願いいたします",
+  "おわり",
+]);
 
-const stripHallucinations = (text: string): string =>
-  HALLUCINATIONS.reduce((rest, phrase) => rest.replaceAll(phrase, ""), text);
+// 本物の発話を削らないよう、発話全体が完全一致したときだけ幻聴とみなす (末尾の句点は無視)
+const isHallucination = (text: string): boolean =>
+  HALLUCINATIONS.has(text.replace(/。$/, ""));
 
 export interface TranscriberOptions {
   baseURL: string;
@@ -57,8 +63,9 @@ export const createTranscriber = ({
           return null;
         throw error;
       });
-      // 幻聴フレーズと、Whisper がトークナイズの都合で付ける前後の空白はここで落とす
-      return stripHallucinations(result?.text ?? "").trim();
+      // Whisper がトークナイズの都合で付ける前後の空白を落とし、発話全体が幻聴フレーズなら捨てる
+      const text = (result?.text ?? "").trim();
+      return isHallucination(text) ? "" : text;
     },
   };
 };

@@ -32,9 +32,6 @@ const { summarize } = createSummarizer({
   model: config.LLM_MODEL,
 });
 
-// 文字起こしを溜めすぎないよう、直近の発話だけを要約対象にする
-const MAX_TRANSCRIPT_LINES = 200;
-
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
 });
@@ -99,7 +96,7 @@ const join = async (
     const name = channel.guild.members.cache.get(userId)?.displayName ?? userId;
     console.log(`transcribed: ${name}: ${text}`);
     transcript.push(`${name}: ${text}`);
-    transcript.splice(0, transcript.length - MAX_TRANSCRIPT_LINES);
+    transcript.splice(0, transcript.length - config.MAX_TRANSCRIPT_LINES);
     dirty = true;
   });
   // SpeakingMap の型定義に error のオーバーロードがないため EventEmitter として扱う

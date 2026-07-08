@@ -1,0 +1,24 @@
+services:
+  bot:
+    image: ghcr.io/OWNER/discord-voice-status-summary:latest
+    build: .
+    env_file: .env
+    environment:
+      TRANSCRIPTION_BASE_URL: http://transcription:8000/v1
+      # LM Studio はホスト側で `lms server start` しておく
+      LLM_BASE_URL: http://host.docker.internal:1234/v1
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      - transcription
+    restart: unless-stopped
+
+  # 文字起こしサーバ (OpenAI 互換 API)。モデルは初回リクエスト時に自動ダウンロードされる。
+  transcription:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    volumes:
+      - hf-cache:/home/ubuntu/.cache/huggingface
+    restart: unless-stopped
+
+volumes:
+  hf-cache:

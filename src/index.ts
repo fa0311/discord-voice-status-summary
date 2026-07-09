@@ -12,6 +12,7 @@ import {
 } from "discord.js";
 import { EventEmitter } from "node:events";
 import { loadConfig } from "./config.ts";
+import { createDropWhileRunning } from "./drop-while-running.ts";
 import { recordUtterance } from "./recorder.ts";
 import { setVoiceStatus } from "./status.ts";
 import { createSummarizer } from "./summarizer.ts";
@@ -63,15 +64,16 @@ const join = async (
   const transcript: string[] = [];
   let dirty = false; // 前回の要約以降に新しい発話があるか
 
-  const updateSummary = async (): Promise<void> => {
-    if (!dirty) return;
-    dirty = false;
-    const summary = await summarize(transcript.join("\n"));
-    await setVoiceStatus(client, channel.id, summary);
-    console.log(`status updated: ${summary}`);
-  };
-  const timer = setInterval(() => {
-    updateSummary().catch((error) => console.error("summarize error:", error));
+  const timer = setInterval(async () => {
+    try {
+      if (!dirty) return;
+      dirty = false;
+      const summary = await summarize(transcript.join("\n"));
+      await setVoiceStatus(client, channel.id, summary);
+      console.log(`status updated: ${summary}`);
+    } catch (e) {
+      console.error("summarize error:", e);
+    }
   }, config.SUMMARY_INTERVAL_MS);
 
   // /leave (destroy) でタイマーを止めてステータスを消す
@@ -82,18 +84,15 @@ const join = async (
   connection.on("error", (error) => console.error("connection error:", error));
 
   // 発話のたびに 録音 → 文字起こし → transcript へ追記。
+  // speaking の start は 1 回の発話中にも再発火するため、録音中ユーザーの分は捨てる。
   // 非同期リスナーの reject は captureRejections で下の error リスナーに届く。
-  const recording = new Set<string>();
+  const ifNotRecording = createDropWhileRunning<string>();
   connection.receiver.speaking.on("start", async (userId: string) => {
-    if (recording.has(userId)) return;
-    recording.add(userId);
-    const wav = await recordUtterance(connection.receiver, userId).finally(() =>
-      recording.delete(userId),
-    );
+    const wav = await ifNotRecording(userId, () => recordUtterance(connection.receiver, userId));
     if (!wav) return;
     const text = await transcribe(wav);
     if (!text) return;
-    const name = channel.guild.members.cache.get(userId)?.displayName ?? userId;
+    const name = channel.guild.members.cache.get(userId)?.displayName ?? "unknown";
     console.log(`transcribed: ${name}: ${text}`);
     transcript.push(`${name}: ${text}`);
     transcript.splice(0, transcript.length - config.MAX_TRANSCRIPT_LINES);

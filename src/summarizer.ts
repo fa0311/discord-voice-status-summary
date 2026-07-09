@@ -5,7 +5,8 @@ import { z } from "zod";
 const SYSTEM_PROMPT = `あなたは Discord 通話の書記です。
 入力は通話の文字起こしで、上から下へ時系列に並んでいます。
 最後に話されている話題を 1 つだけ選び、その中身を日本語 1 行 (全角 40 文字以内) にまとめて summary に入れてください。
-途中で話題が変わっている場合、過去の話題には触れないでください。`;
+途中で話題が変わっている場合、過去の話題には触れないでください。
+summary の 1 文字目は必ず話題を表す絵文字 1 つにして、その直後に本文を続けてください。`;
 
 // 思考過程や前置きが混入しないよう、JSON schema で出力を summary だけに縛る
 const Summary = z.object({ summary: z.string() });
@@ -38,7 +39,9 @@ export const createSummarizer = ({ baseURL, model }: SummarizerOptions): Summari
         // thinking を切る (速度優先。要約タスクに推論は不要)
         providerOptions: { lmstudio: { reasoningEffort: "none" } },
       });
-      return object.summary.trim();
+      // 先頭絵文字の直後は半角空白 1 つに正規化する
+      // (絵文字は複数コードポイントのことがあり、プロンプト指示では安定しないためコードで保証)
+      return object.summary.trim().replace(/^(\p{RGI_Emoji})\s*/v, "$1 ");
     },
   };
 };

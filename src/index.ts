@@ -1,16 +1,6 @@
-import {
-  getVoiceConnection,
-  joinVoiceChannel,
-  VoiceConnectionStatus,
-} from "@discordjs/voice";
-import {
-  type ChatInputCommandInteraction,
-  Client,
-  Events,
-  GatewayIntentBits,
-  SlashCommandBuilder,
-} from "discord.js";
 import { EventEmitter } from "node:events";
+import { getVoiceConnection, joinVoiceChannel, VoiceConnectionStatus } from "@discordjs/voice";
+import { type ChatInputCommandInteraction, Client, Events, GatewayIntentBits, SlashCommandBuilder } from "discord.js";
 import { loadConfig } from "./config.ts";
 import { createDropWhileRunning } from "./drop-while-running.ts";
 import { recordUtterance } from "./recorder.ts";
@@ -27,6 +17,9 @@ const { transcribe } = createTranscriber({
   baseURL: config.TRANSCRIPTION_BASE_URL,
   model: config.TRANSCRIPTION_MODEL,
   language: config.TRANSCRIPTION_LANGUAGE,
+  vad_filter: config.TRANSCRIPTION_VAD_FILTER,
+  prompt: config.TRANSCRIPTION_PROMPT,
+  hotwords: config.TRANSCRIPTION_HOTWORDS,
 });
 const { summarize } = createSummarizer({
   baseURL: config.LLM_BASE_URL,
@@ -37,18 +30,14 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
 });
 
-const join = async (
-  interaction: ChatInputCommandInteraction<"cached">,
-): Promise<void> => {
+const join = async (interaction: ChatInputCommandInteraction<"cached">): Promise<void> => {
   const channel = interaction.member.voice.channel;
   if (!channel) {
     await interaction.reply("先にボイスチャンネルに参加してください。");
     return;
   }
   if (getVoiceConnection(interaction.guildId)) {
-    await interaction.reply(
-      "すでに参加しています。/leave してからやり直してください。",
-    );
+    await interaction.reply("すでに参加しています。/leave してからやり直してください。");
     return;
   }
 
@@ -107,21 +96,15 @@ const join = async (
   await interaction.reply(`${channel.name} の要約を始めます。`);
 };
 
-const leave = async (
-  interaction: ChatInputCommandInteraction<"cached">,
-): Promise<void> => {
+const leave = async (interaction: ChatInputCommandInteraction<"cached">): Promise<void> => {
   getVoiceConnection(interaction.guildId)?.destroy();
   await interaction.reply("退出しました。");
 };
 
 client.once(Events.ClientReady, async (readyClient) => {
   await readyClient.application.commands.set([
-    new SlashCommandBuilder()
-      .setName("join")
-      .setDescription("ボイスチャンネルに参加して要約を始める"),
-    new SlashCommandBuilder()
-      .setName("leave")
-      .setDescription("ボイスチャンネルから退出する"),
+    new SlashCommandBuilder().setName("join").setDescription("ボイスチャンネルに参加して要約を始める"),
+    new SlashCommandBuilder().setName("leave").setDescription("ボイスチャンネルから退出する"),
   ]);
   console.log(`Logged in as ${readyClient.user.tag}`);
 });

@@ -8,6 +8,9 @@ const Env = z.object({
   TRANSCRIPTION_BASE_URL: z.url(),
   TRANSCRIPTION_MODEL: z.string().min(1),
   TRANSCRIPTION_LANGUAGE: z.string().min(1).default("ja"),
+  TRANSCRIPTION_VAD_FILTER: z.coerce.boolean().default(true),
+  TRANSCRIPTION_PROMPT: z.string().min(1).optional(),
+  TRANSCRIPTION_HOTWORDS: z.string().min(1).optional(),
 
   // LM Studio の /v1 まで含めた URL
   LLM_BASE_URL: z.url(),
@@ -22,5 +25,4 @@ const Env = z.object({
 
 export type Config = z.infer<typeof Env>;
 
-export const loadConfig = (env: Record<string, string | undefined>): Config =>
-  Env.parse(env);
+export const loadConfig = (env: Record<string, string | undefined>): Config => Env.parse(env);

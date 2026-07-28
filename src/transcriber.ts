@@ -16,13 +16,15 @@ const HALLUCINATIONS = new Set([
 ]);
 
 // 本物の発話を削らないよう、発話全体が完全一致したときだけ幻聴とみなす (末尾の句点は無視)
-const isHallucination = (text: string): boolean =>
-  HALLUCINATIONS.has(text.replace(/。$/, ""));
+const isHallucination = (text: string): boolean => HALLUCINATIONS.has(text.replace(/。$/, ""));
 
 export interface TranscriberOptions {
   baseURL: string;
   model: string;
   language: string;
+  vad_filter: boolean;
+  prompt: string | undefined;
+  hotwords: string | undefined;
 }
 
 export interface Transcriber {
@@ -34,6 +36,9 @@ export const createTranscriber = ({
   baseURL,
   model,
   language,
+  vad_filter,
+  prompt,
+  hotwords,
 }: TranscriberOptions): Transcriber => {
   const provider = createOpenAI({
     baseURL,
@@ -41,8 +46,12 @@ export const createTranscriber = ({
     // VAD で無音・非音声を落とし、Whisper が無音に幻聴を起こすのを防ぐ。
     // AI SDK が送るフィールドは固定リストで vad_filter を渡せないため、送信直前に差し込む
     fetch: (input, init) => {
-      if (init?.body instanceof FormData)
-        init.body.append("vad_filter", "true");
+      if (init?.body instanceof FormData) {
+        init.body.append("vad_filter", vad_filter ? "true" : "false");
+        if (prompt) init.body.append("prompt", prompt);
+        if (hotwords) init.body.append("hotwords", hotwords);
+      }
+
       return fetch(input, init);
     },
   });
@@ -56,11 +65,7 @@ export const createTranscriber = ({
         providerOptions: { openai: { language } },
       }).catch((error: unknown) => {
         // VAD が「発話なし」と判定すると AI SDK は空の結果をエラーとして投げるので、空文字に読み替える
-        if (
-          error instanceof Error &&
-          error.name === "AI_NoTranscriptGeneratedError"
-        )
-          return null;
+        if (error instanceof Error && error.name === "AI_NoTranscriptGeneratedError") return null;
         throw error;
       });
       // Whisper がトークナイズの都合で付ける前後の空白を落とし、発話全体が幻聴フレーズなら捨てる

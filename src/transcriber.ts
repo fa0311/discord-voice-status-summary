@@ -18,6 +18,10 @@ const HALLUCINATIONS = new Set([
 // 本物の発話を削らないよう、発話全体が完全一致したときだけ幻聴とみなす (末尾の句点は無視)
 const isHallucination = (text: string): boolean => HALLUCINATIONS.has(text.replace(/。$/, ""));
 
+// 文字起こしサーバが応答しないまま WAV を掴み続けるのを防ぐ。
+// GPU を他のコンテナと共有しており、競合すると応答が返らないことがある
+const TRANSCRIBE_TIMEOUT_MS = 60_000;
+
 export interface TranscriberOptions {
   baseURL: string;
   model: string;
@@ -52,7 +56,12 @@ export const createTranscriber = ({
         if (hotwords) init.body.append("hotwords", hotwords);
       }
 
-      return fetch(input, init);
+      // AI SDK 側が中断シグナルを渡してくる場合があるので、タイムアウトと合成する
+      const timeout = AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS);
+      return fetch(input, {
+        ...init,
+        signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
+      });
     },
   });
   const transcriptionModel = provider.transcription(model);

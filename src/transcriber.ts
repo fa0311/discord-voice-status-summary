@@ -19,7 +19,8 @@ const HALLUCINATIONS = new Set([
 const isHallucination = (text: string): boolean => HALLUCINATIONS.has(text.replace(/。$/, ""));
 
 // 文字起こしサーバが応答しないまま WAV を掴み続けるのを防ぐ。
-// GPU を他のコンテナと共有しており、競合すると応答が返らないことがある
+// GPU を他のコンテナと共有しており、競合すると応答が返らないことがある。
+// AI SDK のリトライも含めた 1 回の文字起こし全体に対する上限
 const TRANSCRIBE_TIMEOUT_MS = 60_000;
 
 export interface TranscriberOptions {
@@ -55,13 +56,7 @@ export const createTranscriber = ({
         if (prompt) init.body.append("prompt", prompt);
         if (hotwords) init.body.append("hotwords", hotwords);
       }
-
-      // AI SDK 側が中断シグナルを渡してくる場合があるので、タイムアウトと合成する
-      const timeout = AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS);
-      return fetch(input, {
-        ...init,
-        signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
-      });
+      return fetch(input, init);
     },
   });
   const transcriptionModel = provider.transcription(model);
@@ -72,6 +67,7 @@ export const createTranscriber = ({
         model: transcriptionModel,
         audio: wav,
         providerOptions: { openai: { language } },
+        abortSignal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
       }).catch((error: unknown) => {
         // VAD が「発話なし」と判定すると AI SDK は空の結果をエラーとして投げるので、空文字に読み替える
         if (error instanceof Error && error.name === "AI_NoTranscriptGeneratedError") return null;

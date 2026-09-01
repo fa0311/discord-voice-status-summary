@@ -2,11 +2,10 @@ import { EventEmitter } from "node:events";
 import { getVoiceConnection, joinVoiceChannel, VoiceConnectionStatus } from "@discordjs/voice";
 import { type ChatInputCommandInteraction, Client, Events, GatewayIntentBits, SlashCommandBuilder } from "discord.js";
 import { loadConfig } from "./config.ts";
-import { createDropWhileRunning } from "./drop-while-running.ts";
-import { recordUtterance } from "./recorder.ts";
 import { setVoiceStatus } from "./status.ts";
 import { createSummarizer } from "./summarizer.ts";
 import { createTranscriber } from "./transcriber.ts";
+import { createUtteranceSource } from "./utterance-source.ts";
 
 // 非同期リスナーの reject を各 EventEmitter の error イベントに集約する
 EventEmitter.captureRejections = true;
@@ -65,32 +64,35 @@ const join = async (interaction: ChatInputCommandInteraction<"cached">): Promise
     }
   }, config.SUMMARY_INTERVAL_MS);
 
-  // /leave (destroy) でタイマーを止めてステータスを消す
-  connection.on(VoiceConnectionStatus.Destroyed, async () => {
-    clearInterval(timer);
-    await setVoiceStatus(client, channel.id, "");
-  });
-  connection.on("error", (error) => console.error("connection error:", error));
+  const displayName = (userId: string) => channel.guild.members.cache.get(userId)?.displayName ?? "unknown";
 
-  // 発話のたびに 録音 → 文字起こし → transcript へ追記。
-  // speaking の start は 1 回の発話中にも再発火するため、録音中ユーザーの分は捨てる。
-  // 非同期リスナーの reject は captureRejections で下の error リスナーに届く。
-  const ifNotRecording = createDropWhileRunning<string>();
-  connection.receiver.speaking.on("start", async (userId: string) => {
-    const wav = await ifNotRecording(userId, () => recordUtterance(connection.receiver, userId));
-    if (!wav) return;
+  const utterances = createUtteranceSource(connection.receiver);
+  // 発話が確定するたびに 文字起こし → transcript へ追記
+  utterances.emitter.on("utterance", async (userId, wav) => {
     const text = await transcribe(wav);
     if (!text) return;
-    const name = channel.guild.members.cache.get(userId)?.displayName ?? "unknown";
+    const name = displayName(userId);
     console.log(`transcribed: ${name}: ${text}`);
     transcript.push(`${name}: ${text}`);
     transcript.splice(0, transcript.length - config.MAX_TRANSCRIPT_LINES);
     dirty = true;
   });
-  // SpeakingMap の型定義に error のオーバーロードがないため EventEmitter として扱う
-  (connection.receiver.speaking as EventEmitter).on("error", (error: Error) =>
-    console.error("utterance error:", error),
+  // 短すぎる発話は日常的なノイズなので黙って捨てる。長すぎる発話はマイク設定の問題なので誰のものか残す
+  utterances.emitter.on("dropped", (userId, reason) => {
+    if (reason === "too-long") console.warn(`utterance dropped (${reason}): ${displayName(userId)}`);
+  });
+  // 文字起こし (utterance リスナー) の reject も captureRejections でここに届く
+  utterances.emitter.on("error", (error, userId) =>
+    console.error(`utterance error (${userId ? displayName(userId) : "-"}):`, error),
   );
+
+  // /leave (destroy) で購読とタイマーを止めてステータスを消す
+  connection.on(VoiceConnectionStatus.Destroyed, async () => {
+    utterances.close();
+    clearInterval(timer);
+    await setVoiceStatus(client, channel.id, "");
+  });
+  connection.on("error", (error) => console.error("connection error:", error));
 
   console.log(`joined: ${channel.guild.name} / ${channel.name}`);
   await interaction.reply(`${channel.name} の要約を始めます。`);

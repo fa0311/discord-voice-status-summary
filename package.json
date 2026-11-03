@@ -22,7 +22,7 @@
     "ai": "^5.0.0",
     "discord.js": "^14.16.0",
     "sodium-native": "^5.0.0",
-    "zod": "^4.0.0"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",
